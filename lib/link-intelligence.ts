@@ -14,6 +14,7 @@ const TITLE_FETCH_TIMEOUT_MS = 1400;
 const MAX_TITLE_GENERATION_ITEMS = 80;
 const CODEX_TIMEOUT_MS = Number(process.env.DINGTALK_RADAR_LINK_CODEX_TIMEOUT_MS ?? 180_000);
 const CODEX_MODEL = process.env.DINGTALK_RADAR_CODEX_MODEL;
+const CODEX_BIN = process.env.DINGTALK_RADAR_CODEX_BIN || 'codex';
 const LINK_INTELLIGENCE_CACHE_VERSION = 'v8';
 const LINK_INTELLIGENCE_CACHE_TTL_SECONDS = 60 * 60 * 24;
 
@@ -319,7 +320,7 @@ function runCodexJson<T>(prompt: string, schema: unknown, timeoutMs = CODEX_TIME
     if (CODEX_MODEL) args.push('--model', CODEX_MODEL);
     args.push('-');
 
-    const proc = spawn('codex', args, {
+    const proc = spawn(CODEX_BIN, args, {
       env: { ...process.env, NO_COLOR: '1' },
       stdio: ['pipe', 'ignore', 'pipe'],
     });

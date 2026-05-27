@@ -14,6 +14,7 @@ const MAX_TOPICS_TO_SAVE = 30;
 const CODEX_CHUNK_SIZE = Number(process.env.DINGTALK_RADAR_TOPIC_CHUNK_SIZE ?? 250);
 const CODEX_TIMEOUT_MS = Number(process.env.DINGTALK_RADAR_CODEX_TIMEOUT_MS ?? 300_000);
 const CODEX_MODEL = process.env.DINGTALK_RADAR_CODEX_MODEL;
+const CODEX_BIN = process.env.DINGTALK_RADAR_CODEX_BIN || 'codex';
 const TOPICS_PER_CHUNK = 12;
 
 interface SourceMsg {
@@ -194,7 +195,7 @@ function runCodexJson<T>(prompt: string, timeoutMs = CODEX_TIMEOUT_MS): Promise<
     args.push('-');
 
     const proc = spawn(
-      'codex',
+      CODEX_BIN,
       args,
       { env: { ...process.env, NO_COLOR: '1' }, stdio: ['pipe', 'pipe', 'pipe'] },
     );

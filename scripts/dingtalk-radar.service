@@ -12,6 +12,8 @@ Environment=NODE_ENV=production
 Environment=NEXT_TELEMETRY_DISABLED=1
 Environment=DINGTALK_RADAR_DATA_DIR=%h/.dingtalk-radar
 Environment=PATH=%h/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# codex on this box lives in the openclaw-managed npx cache; pin it here
+Environment=DINGTALK_RADAR_CODEX_BIN=%h/.npm/_npx/c8ab89660c602c20/node_modules/.bin/codex
 StandardOutput=journal
 StandardError=journal
 
