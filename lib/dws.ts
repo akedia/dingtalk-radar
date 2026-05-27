@@ -148,11 +148,33 @@ function parseMessage(entry: unknown): DwsMessage | null {
     'id',
   );
   if (!message_id) return null;
-  // dws normally returns createTime in ms; downstream stores seconds.
-  let ts = pickNumber(obj, 'createTime', 'createTimestamp', 'sendTime', 'timestamp', 'msgTimestamp');
+  // dws v1.0.26 returns createTime as a date string "yyyy-MM-dd HH:mm:ss";
+  // earlier docs implied ms epoch. Handle both. Downstream stores seconds.
+  let ts = 0;
+  const createTimeRaw = obj['createTime'] ?? obj['createTimestamp'] ?? obj['sendTime'] ?? obj['timestamp'] ?? obj['msgTimestamp'];
+  if (typeof createTimeRaw === 'number' && Number.isFinite(createTimeRaw)) {
+    ts = createTimeRaw;
+  } else if (typeof createTimeRaw === 'string' && createTimeRaw) {
+    // Interpret "yyyy-MM-dd HH:mm:ss" as Asia/Shanghai (DingTalk's home tz).
+    const m = createTimeRaw.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})/);
+    if (m) {
+      const utcMs = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4] - 8, +m[5], +m[6]);
+      ts = Math.floor(utcMs / 1000);
+    } else {
+      const parsed = Date.parse(createTimeRaw);
+      if (Number.isFinite(parsed)) ts = Math.floor(parsed / 1000);
+    }
+  }
   if (ts > 1e12) ts = Math.floor(ts / 1000);
   const sender = pickString(obj, 'senderName', 'senderNick', 'sender', 'senderUserName');
-  const sender_id = pickString(obj, 'senderId', 'senderUserId', 'senderStaffId', 'openSenderId');
+  const sender_id = pickString(
+    obj,
+    'senderId',
+    'senderUserId',
+    'senderStaffId',
+    'openSenderId',
+    'senderOpenDingTalkId',
+  );
   const type = pickString(obj, 'msgType', 'type', 'messageType') || 'text';
   const contentRaw = obj['text'] ?? obj['content'] ?? obj['msgContent'];
   let content = '';
@@ -181,24 +203,26 @@ function parseMessage(entry: unknown): DwsMessage | null {
   };
 }
 
-// Pulls group messages in a [since, until] window using dws's forward-paged
-// `message list` (PC only). Pages are stitched by re-issuing with the boundary
-// createTime until hasMore=false or we cross `until`.
+// Pulls group messages in a [since, until] window using dws's
+// `chat message list`. The API returns messages in descending createTime
+// order; we paginate BACKWARDS from `until` with --forward=false, using the
+// oldest message in each page as the next cursor.
 export async function dwsHistory(
   group: string,
   since: string,
   until: string,
-  pageLimit = 500,
+  pageLimit = 100,
   maxMessages = 5000,
 ): Promise<DwsMessage[]> {
-  const sinceMs = Date.parse(since);
-  const untilMs = Date.parse(until);
-  if (!Number.isFinite(sinceMs) || !Number.isFinite(untilMs)) {
+  const sinceSec = Math.floor(Date.parse(since) / 1000);
+  const untilSec = Math.floor(Date.parse(until) / 1000);
+  if (!Number.isFinite(sinceSec) || !Number.isFinite(untilSec)) {
     throw new Error(`dwsHistory: bad time range ${since} ${until}`);
   }
   const out: DwsMessage[] = [];
   const seen = new Set<string>();
-  let cursor = since;
+  // dws expects "yyyy-MM-dd HH:mm:ss" in the local server tz; pass through `until` literally first.
+  let cursor = until;
   let safety = 0;
   while (safety < 200) {
     safety += 1;
@@ -213,25 +237,40 @@ export async function dwsHistory(
       '--limit',
       String(pageLimit),
       '--forward',
-      'true',
+      'false',
     ]);
     const items = unwrapList(raw);
     if (items.length === 0) break;
-    let advanced = false;
-    let pageMax = sinceMs;
+    let pageMin = Number.POSITIVE_INFINITY;
+    let pageMax = 0;
+    let added = 0;
     for (const entry of items) {
       const msg = parseMessage(entry);
       if (!msg || seen.has(msg.message_id)) continue;
-      if (msg.timestamp > untilMs) continue;
+      if (msg.timestamp <= 0) continue;
+      if (msg.timestamp < sinceSec || msg.timestamp > untilSec) {
+        if (msg.timestamp < pageMin) pageMin = msg.timestamp;
+        if (msg.timestamp > pageMax) pageMax = msg.timestamp;
+        continue;
+      }
       seen.add(msg.message_id);
       out.push(msg);
+      added += 1;
+      if (msg.timestamp < pageMin) pageMin = msg.timestamp;
       if (msg.timestamp > pageMax) pageMax = msg.timestamp;
-      advanced = true;
     }
     const hasMore =
       raw && typeof raw === 'object' && (raw as Record<string, unknown>)['hasMore'] === true;
-    if (!hasMore || !advanced || out.length >= maxMessages) break;
-    cursor = toIsoTime(pageMax + 1) || cursor;
+    // Stop once the page's oldest message is already older than `since` — we've covered the window.
+    if (!hasMore || added === 0 || pageMin <= sinceSec || out.length >= maxMessages) {
+      // Allow one more page if we did add some messages but did not yet cross `since`.
+      if (hasMore && added > 0 && pageMin > sinceSec && out.length < maxMessages) {
+        cursor = toIsoTime(pageMin - 1) || cursor;
+        continue;
+      }
+      break;
+    }
+    cursor = toIsoTime(pageMin - 1) || cursor;
   }
   out.sort((a, b) => a.timestamp - b.timestamp);
   return out;
