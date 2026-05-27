@@ -16,6 +16,11 @@ Environment=PATH=%h/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
 # (0.134 cache hash 5010de4b76d2184a — the openclaw default 0.106 hash
 # c8ab89660c602c20 doesn't support gpt-5.5)
 Environment=DINGTALK_RADAR_CODEX_BIN=%h/.npm/_npx/5010de4b76d2184a/node_modules/.bin/codex
+# gpt-5.5 is a reasoning model; on high-volume days a single chunk can take
+# 5+ minutes. Bump timeout and lower chunk size to fit busy P2/X2 monitoring days.
+Environment=DINGTALK_RADAR_CODEX_TIMEOUT_MS=900000
+Environment=DINGTALK_RADAR_LINK_CODEX_TIMEOUT_MS=600000
+Environment=DINGTALK_RADAR_TOPIC_CHUNK_SIZE=150
 StandardOutput=journal
 StandardError=journal
 
