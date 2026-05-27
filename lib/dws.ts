@@ -207,6 +207,35 @@ function parseMessage(entry: unknown): DwsMessage | null {
 // `chat message list`. The API returns messages in descending createTime
 // order; we paginate BACKWARDS from `until` with --forward=false, using the
 // oldest message in each page as the next cursor.
+// Parses a "yyyy-MM-dd" or "yyyy-MM-dd HH:mm:ss" string as Asia/Shanghai local
+// time and returns Unix seconds. Bare dates use start-of-day for `since` and
+// end-of-day for `until`, mirroring DingTalk's calendar-day semantics.
+function parseShanghaiSeconds(input: string, role: 'since' | 'until'): number {
+  if (!input) return NaN;
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(input);
+  if (dateOnly) {
+    const [, y, mo, d] = dateOnly;
+    const h = role === 'until' ? 23 : 0;
+    const mi = role === 'until' ? 59 : 0;
+    const s = role === 'until' ? 59 : 0;
+    return Math.floor(Date.UTC(+y, +mo - 1, +d, h - 8, mi, s) / 1000);
+  }
+  const full = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})/.exec(input);
+  if (full) {
+    const [, y, mo, d, h, mi, s] = full;
+    return Math.floor(Date.UTC(+y, +mo - 1, +d, +h - 8, +mi, +s) / 1000);
+  }
+  const parsed = Date.parse(input);
+  return Number.isFinite(parsed) ? Math.floor(parsed / 1000) : NaN;
+}
+
+function shanghaiDateTimeString(input: string, role: 'since' | 'until'): string {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(input)) {
+    return role === 'until' ? `${input} 23:59:59` : `${input} 00:00:00`;
+  }
+  return input;
+}
+
 export async function dwsHistory(
   group: string,
   since: string,
@@ -219,15 +248,15 @@ export async function dwsHistory(
 ): Promise<DwsMessage[]> {
   const cappedPageLimit = Math.max(1, Math.min(pageLimit, 100));
   const maxMessages = Math.max(cappedPageLimit, totalLimit);
-  const sinceSec = Math.floor(Date.parse(since) / 1000);
-  const untilSec = Math.floor(Date.parse(until) / 1000);
+  const sinceSec = parseShanghaiSeconds(since, 'since');
+  const untilSec = parseShanghaiSeconds(until, 'until');
   if (!Number.isFinite(sinceSec) || !Number.isFinite(untilSec)) {
     throw new Error(`dwsHistory: bad time range ${since} ${until}`);
   }
   const out: DwsMessage[] = [];
   const seen = new Set<string>();
-  // dws expects "yyyy-MM-dd HH:mm:ss" in the local server tz; pass through `until` literally first.
-  let cursor = until;
+  // dws expects "yyyy-MM-dd HH:mm:ss" in Shanghai local time; pad bare dates.
+  let cursor = shanghaiDateTimeString(until, 'until');
   let safety = 0;
   while (safety < 200) {
     safety += 1;
