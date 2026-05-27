@@ -1,12 +1,13 @@
 import pLimit from 'p-limit';
 import { db } from './db';
-import { dwsHistory, dwsStats } from './dws';
+import { dwsHistory, dwsHistoryAll, dwsStats } from './dws';
 import {
   aggregateDailyStats,
   bulkInsertMessages,
   upsertSyncState,
 } from './messages-store';
 import { rebuildMentionIndexFromMessages } from './mentions';
+import { setAlias } from './groups';
 import type { DwsStats } from './dws-types';
 
 export type StatsRow = {
@@ -303,6 +304,103 @@ export async function syncFullHistory({
   });
 
   return { ok, failed, messages: totalMessages };
+}
+
+/**
+ * Cross-conversation rescan: pull every conv (groups + DMs) via dws list-all,
+ * auto-discover new chatrooms, save aliases from envelope titles. Used when
+ * the user prefers wholesale sync over per-trackedGroup pulls.
+ */
+export interface SyncAllOptions {
+  since: string;
+  until: string;
+  onProgress?: (p: RescanProgress) => void;
+}
+
+export async function syncAllConversations({
+  since,
+  until,
+  onProgress,
+}: SyncAllOptions): Promise<{ conversations: number; messages: number; failed: number }> {
+  const chunks = monthChunks(since, until);
+  let totalConvs = 0;
+  let totalMessages = 0;
+  let failed = 0;
+  const touchedChatrooms = new Set<string>();
+  let done = 0;
+  const total = chunks.length;
+
+  for (const c of chunks) {
+    try {
+      const bundles = await dwsHistoryAll(c.since, c.until);
+      for (const b of bundles) {
+        if (b.title) setAlias(b.open_conversation_id, b.title);
+        const filtered = b.messages.filter(
+          (m) => m.timestamp > 0,
+        );
+        const inserted = bulkInsertMessages(b.open_conversation_id, filtered);
+        totalMessages += inserted;
+        touchedChatrooms.add(b.open_conversation_id);
+        if (b.messages.length > 0) totalConvs += 1;
+      }
+      done += 1;
+      onProgress?.({
+        type: 'progress',
+        done,
+        total,
+        current: `${c.since.slice(0, 7)}`,
+        inserted_messages: totalMessages,
+      });
+    } catch (e) {
+      failed += 1;
+      const message = e instanceof Error ? e.message : String(e);
+      onProgress?.({
+        type: 'error',
+        done,
+        total,
+        current: `${c.since.slice(0, 7)}`,
+        error: message,
+        inserted_messages: totalMessages,
+      });
+    }
+  }
+
+  // Roll up daily_stats for every chatroom we touched
+  const dates = dateList(since, until);
+  for (const cid of touchedChatrooms) {
+    const buckets = aggregateDailyStats(cid, dates);
+    for (const b of buckets) {
+      saveStats({
+        chatroom_id: cid,
+        date: b.date,
+        total: b.total,
+        top_senders: b.top_senders,
+        by_hour: b.by_hour,
+      });
+    }
+    const row = db()
+      .prepare(
+        'SELECT MIN(date) AS d, MAX(date) AS dx, COUNT(*) AS n FROM messages WHERE chatroom_id = ?',
+      )
+      .get(cid) as { d: string | null; dx: string | null; n: number };
+    upsertSyncState(cid, row.n, row.d, row.dx, {
+      status: row.n > 0 ? 'ok' : 'empty',
+      failedChunks: 0,
+      emptyChunks: 0,
+      totalChunks: chunks.length,
+    });
+  }
+
+  rebuildMentionIndexFromMessages();
+
+  onProgress?.({
+    type: 'done',
+    done: total,
+    total,
+    inserted_messages: totalMessages,
+  });
+
+  return { conversations: touchedChatrooms.size, messages: totalMessages, failed };
 }
 
 /**

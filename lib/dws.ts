@@ -311,6 +311,91 @@ export async function dwsHistory(
   return out;
 }
 
+export interface DwsConversationBundle {
+  open_conversation_id: string;
+  title: string;
+  is_group: boolean;
+  messages: DwsMessage[];
+}
+
+// Pulls every conversation (groups + DMs) in [since, until] via the cross-
+// conversation `list-all` endpoint. Returns one bundle per conversation
+// envelope so callers can auto-discover new chatrooms and save aliases.
+export async function dwsHistoryAll(
+  since: string,
+  until: string,
+  pageLimit = 100,
+  maxPages = 50,
+): Promise<DwsConversationBundle[]> {
+  const sinceStr = shanghaiDateTimeString(since, 'since');
+  const untilStr = shanghaiDateTimeString(until, 'until');
+  const cappedPageLimit = Math.max(1, Math.min(pageLimit, 100));
+  const bundles = new Map<string, DwsConversationBundle>();
+  let cursor = '0';
+  let safety = 0;
+  while (safety < maxPages) {
+    safety += 1;
+    const raw = await dwsJson<unknown>([
+      'chat',
+      'message',
+      'list-all',
+      '--start',
+      sinceStr,
+      '--end',
+      untilStr,
+      '--limit',
+      String(cappedPageLimit),
+      '--cursor',
+      cursor,
+    ]);
+    const result =
+      raw && typeof raw === 'object' ? (raw as Record<string, unknown>)['result'] : null;
+    const envelopes = ((result && typeof result === 'object'
+      ? (result as Record<string, unknown>)['conversationMessagesList']
+      : null) ?? []) as unknown[];
+    let addedAny = false;
+    for (const env of envelopes) {
+      if (!env || typeof env !== 'object') continue;
+      const e = env as Record<string, unknown>;
+      const cid = pickString(e, 'openConversationId', 'open_conversation_id', 'id');
+      if (!cid) continue;
+      const title = pickString(e, 'title', 'chatName', 'name');
+      const singleChat = Boolean(e['singleChat']);
+      const rawMessages = (e['messages'] ?? []) as unknown[];
+      const bundle =
+        bundles.get(cid) ??
+        ({
+          open_conversation_id: cid,
+          title,
+          is_group: !singleChat,
+          messages: [],
+        } as DwsConversationBundle);
+      const seen = new Set(bundle.messages.map((m) => m.message_id));
+      for (const entry of rawMessages) {
+        const msg = parseMessage(entry);
+        if (!msg || seen.has(msg.message_id)) continue;
+        bundle.messages.push(msg);
+        seen.add(msg.message_id);
+        addedAny = true;
+      }
+      if (title && !bundle.title) bundle.title = title;
+      bundles.set(cid, bundle);
+    }
+    const hasMore =
+      result && typeof result === 'object' && (result as Record<string, unknown>)['hasMore'] === true;
+    const nextCursor =
+      result && typeof result === 'object'
+        ? (result as Record<string, unknown>)['nextCursor']
+        : null;
+    if (!hasMore || !addedAny || nextCursor === null || nextCursor === undefined) break;
+    cursor = String(nextCursor);
+    if (!cursor || cursor === '0') break;
+  }
+  // sort each bundle ascending
+  for (const b of bundles.values()) b.messages.sort((a, b) => a.timestamp - b.timestamp);
+  return Array.from(bundles.values());
+}
+
 export async function dwsStats(
   group: string,
   since: string,

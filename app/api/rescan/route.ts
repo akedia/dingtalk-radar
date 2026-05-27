@@ -1,8 +1,6 @@
 import { NextRequest } from 'next/server';
-import { dwsSessions } from '@/lib/dws';
-import { syncFullHistory } from '@/lib/stats-aggregator';
+import { syncAllConversations } from '@/lib/stats-aggregator';
 import { normalizeDate, normalizeRangeKey, rangeToWindow, type RangeKey } from '@/lib/range';
-import { readConfig } from '@/lib/config';
 import { cache, CK } from '@/lib/cache';
 import { buildTopicsForDate } from '@/lib/topics';
 
@@ -41,28 +39,18 @@ export async function POST(req: NextRequest) {
     scope = range;
   }
 
-  const cfg = readConfig();
-  const sessions = await dwsSessions(cfg.trackedGroups ?? []);
-  const targets = sessions
-    .filter((s) => s.is_group)
-    .map((s) => ({ chatroomId: s.username, display: s.chat }));
-
-  const concurrency = cfg.rescanConcurrency ?? 3;
-
   const stream = new ReadableStream({
     async start(controller) {
       const enc = new TextEncoder();
       const send = (obj: unknown) =>
         controller.enqueue(enc.encode(`data: ${JSON.stringify(obj)}\n\n`));
 
-      send({ type: 'start', scope, since, until, groups: targets.length });
+      send({ type: 'start', scope, since, until });
 
       try {
-        const result = await syncFullHistory({
-          targets,
+        const result = await syncAllConversations({
           since,
           until,
-          concurrency,
           onProgress: (p) => send(p),
         });
 
@@ -76,7 +64,7 @@ export async function POST(req: NextRequest) {
         cache.del(CK.sessions());
         send({
           type: 'finished',
-          ok: result.ok,
+          conversations: result.conversations,
           failed: result.failed,
           messages: result.messages,
         });
