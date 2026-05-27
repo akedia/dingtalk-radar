@@ -36,12 +36,5 @@
     "typescript": "^5"
   },
   "description": "Local-first DingTalk group intelligence dashboard, powered by the dws CLI",
-  "license": "MIT",
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "better-sqlite3",
-      "sharp",
-      "unrs-resolver"
-    ]
-  }
+  "license": "MIT"
 }
