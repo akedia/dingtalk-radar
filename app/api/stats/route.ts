@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { dwsSessions } from '@/lib/dws';
 import type { DwsSession } from '@/lib/dws-types';
 import { listCachedStatsRange } from '@/lib/stats-aggregator';
-import { listAllTags, listGroups, listFavorites } from '@/lib/groups';
+import { listAllTags, listGroups, listFavorites, listAliases } from '@/lib/groups';
 import { effectiveGroupIds } from '@/lib/group-classifier';
 import { rangeToWindow, dateList, normalizeDate, normalizeRangeKey } from '@/lib/range';
 import { countMentionsBetween } from '@/lib/mentions';
@@ -21,8 +21,11 @@ export async function GET(req: NextRequest) {
     const w = rangeToWindow(range, anchorDate);
 
   const sessions = await loadSessionsSafe(500);
+  const aliases = listAliases();
+  const displayName = (s: { username: string; chat: string }) =>
+    aliases.get(s.username) ?? s.chat ?? s.username;
   const groups = sessions.filter((s) => s.is_group);
-  const groupNames = new Map(groups.map((g) => [g.username, g.chat]));
+  const groupNames = new Map(groups.map((g) => [g.username, displayName(g)]));
   const allCount = groups.length;
 
   const cached = listCachedStatsRange(w.since, w.until);
@@ -57,7 +60,7 @@ export async function GET(req: NextRequest) {
   const topActiveGroups = groups
     .map((g) => ({
       chatroom_id: g.username,
-      name: g.chat,
+      name: displayName(g),
       summary: g.summary,
       total: totalsByGroup.get(g.username) ?? 0,
       top_senders: Array.from(sendersByGroup.get(g.username)?.entries() ?? [])
@@ -80,7 +83,7 @@ export async function GET(req: NextRequest) {
   for (const g of groups) {
     effectiveTagsByChatroom.set(
       g.username,
-      effectiveGroupIds(g.chat, g.summary, tagsByChatroom.get(g.username) ?? [], cats),
+      effectiveGroupIds(displayName(g), g.summary, tagsByChatroom.get(g.username) ?? [], cats),
     );
   }
   const taggedChatroomIds = new Set(
