@@ -194,7 +194,10 @@ function isToolLink(url: string, content: string): boolean {
     }
     if (isArticleLink(url)) return false;
     if (TOOL_HOST_HINTS.some((h) => host === h || host.endsWith(`.${h}`))) return true;
-    return TOOL_HINT_RE.test(content);
+    if (TOOL_HINT_RE.test(content)) return true;
+    // DingTalk fallback: any remaining non-junk link gets treated as a tool so
+    // operational links (Jira tickets, Play Store, internal docs) show up.
+    return true;
   } catch {
     return false;
   }

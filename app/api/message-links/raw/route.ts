@@ -27,7 +27,6 @@ export async function GET(req: NextRequest) {
       `SELECT chatroom_id, message_id, sender, time, url, canonical_url, title, domain, source, raw_kind
        FROM message_links
        WHERE date = ?
-         AND canonical_url LIKE '%://mp.weixin.qq.com/%'
        ORDER BY timestamp DESC
        LIMIT 200`,
     )
