@@ -211,9 +211,14 @@ export async function dwsHistory(
   group: string,
   since: string,
   until: string,
+  // The original wx-cli wrapper accepted up to 50_000 in a single call. dws
+  // enforces a much smaller per-page cap (~100); we paginate to reach the
+  // caller's intended total.
+  totalLimit = 5000,
   pageLimit = 100,
-  maxMessages = 5000,
 ): Promise<DwsMessage[]> {
+  const cappedPageLimit = Math.max(1, Math.min(pageLimit, 100));
+  const maxMessages = Math.max(cappedPageLimit, totalLimit);
   const sinceSec = Math.floor(Date.parse(since) / 1000);
   const untilSec = Math.floor(Date.parse(until) / 1000);
   if (!Number.isFinite(sinceSec) || !Number.isFinite(untilSec)) {
@@ -235,9 +240,10 @@ export async function dwsHistory(
       '--time',
       cursor,
       '--limit',
-      String(pageLimit),
-      '--forward',
-      'false',
+      String(cappedPageLimit),
+      // cobra bool flag: only `--forward=false` syntax sets it to false;
+      // `--forward false` would treat "false" as a positional arg.
+      '--forward=false',
     ]);
     const items = unwrapList(raw);
     if (items.length === 0) break;
