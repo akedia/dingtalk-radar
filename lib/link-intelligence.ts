@@ -314,6 +314,7 @@ function runCodexJson<T>(prompt: string, schema: unknown, timeoutMs = CODEX_TIME
       '--sandbox',
       'read-only',
       '--ephemeral',
+      '--skip-git-repo-check',
       '--output-schema',
       schemaPath,
       '--output-last-message',

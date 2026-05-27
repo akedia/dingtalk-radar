@@ -180,6 +180,8 @@ function runCodexJson<T>(prompt: string, timeoutMs = CODEX_TIMEOUT_MS): Promise<
 
     // --ignore-rules exists only on newer codex CLI (>=0.110); we omit it for
     // compatibility with the npx-cached codex builds shipped via openclaw.
+    // --skip-git-repo-check lets codex run from any cwd (radar runs under
+    // systemd in a non-git working dir).
     const args = [
       '-a',
       'never',
@@ -187,6 +189,7 @@ function runCodexJson<T>(prompt: string, timeoutMs = CODEX_TIMEOUT_MS): Promise<
       '--sandbox',
       'read-only',
       '--ephemeral',
+      '--skip-git-repo-check',
       '--output-schema',
       schemaPath,
       '--output-last-message',
