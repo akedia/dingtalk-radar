@@ -178,6 +178,8 @@ function runCodexJson<T>(prompt: string, timeoutMs = CODEX_TIMEOUT_MS): Promise<
     const outPath = join(dir, 'response.json');
     writeFileSync(schemaPath, JSON.stringify(TOPIC_RESPONSE_SCHEMA), 'utf8');
 
+    // --ignore-rules exists only on newer codex CLI (>=0.110); we omit it for
+    // compatibility with the npx-cached codex builds shipped via openclaw.
     const args = [
       '-a',
       'never',
@@ -185,7 +187,6 @@ function runCodexJson<T>(prompt: string, timeoutMs = CODEX_TIMEOUT_MS): Promise<
       '--sandbox',
       'read-only',
       '--ephemeral',
-      '--ignore-rules',
       '--output-schema',
       schemaPath,
       '--output-last-message',
